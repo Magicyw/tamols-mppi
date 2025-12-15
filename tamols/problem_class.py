@@ -22,7 +22,10 @@ import time
 
 class TAMOLS():
     def __init__(self, gait: Gait, terrain: Terrain, robot: Robot,
-                 x_lb: np.ndarray = None, x_ub: np.ndarray = None):
+                 x_lb: np.ndarray = None, x_ub: np.ndarray = None,
+                 num_samples: int = 1000, num_iterations: int = 100,
+                 temperature: float = 1.0, noise_sigma: float = 0.1,
+                 w_eq: float = 1000.0, w_ineq: float = 1000.0):
 
         self.gait = gait
         self.terrain = terrain
@@ -134,14 +137,14 @@ class TAMOLS():
         self._c_ineq    = jit(lambda x, cs: self.compute_ineq_constraints(x, cs))
 
         # MPPI hyperparameters
-        self.num_samples = 1000
-        self.num_iterations = 100
-        self.temperature = 1.0
-        self.noise_sigma = 0.1
+        self.num_samples = num_samples
+        self.num_iterations = num_iterations
+        self.temperature = temperature
+        self.noise_sigma = noise_sigma
         
         # Constraint penalty weights
-        self.w_eq = 1000.0
-        self.w_ineq = 1000.0
+        self.w_eq = w_eq
+        self.w_ineq = w_ineq
 
      # -------- helpers used inside the objective --------
     def _cost_at_t(self, a_pos, a_rot, t, limb_center, T_k_phase):
@@ -540,23 +543,33 @@ class TAMOLS():
         
         # Initialize with configurable seed
         if seed is None:
-            import time as time_module
-            seed = int(time_module.time() * 1000000) % (2**32)
+            seed = int(time.time() * 1000000) % (2**32)
         key = random.PRNGKey(seed)
         
         # Use float64 for better precision
         x_mean = jnp.asarray(x0, dtype=jnp.float64)
         
-        # MPPI iterations
+        # MPPI iterations with convergence tracking
+        prev_cost = float('inf')
+        cost_improvement_threshold = 1e-6
+        converged = False
+        
         for iteration in range(self.num_iterations):
             key, x_mean, avg_cost = mppi_step(key, x_mean, self.current_state)
+            
+            # Check convergence based on cost improvement
+            cost_improvement = abs(prev_cost - float(avg_cost))
+            if cost_improvement < cost_improvement_threshold and iteration > 0:
+                converged = True
+                break
+            prev_cost = float(avg_cost)
         
         x_sol = np.asarray(x_mean, dtype=float)
         
         # Create info dict similar to cyipopt for compatibility
         # Store the original objective (without penalties) for consistency
         info = {
-            'status': 0,  # Success
+            'status': 0 if converged else 1,  # 0 = converged, 1 = max iterations
             'obj_val': float(self.compute_objective(jnp.asarray(x_sol), self.current_state))
         }
         
