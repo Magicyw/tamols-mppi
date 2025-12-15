@@ -4,85 +4,98 @@ This document describes the control-space Model Predictive Path Integral (MPPI) 
 
 ## Overview
 
-The control-space MPPI implementation addresses the key limitation of the original state-space approach by sampling **control inputs** (accelerations) and propagating them through forward dynamics, rather than directly sampling state variables (spline coefficients).
+The control-space MPPI implementation uses a **hybrid approach** that combines:
+1. **Control-space sampling**: Samples spline coefficients as control inputs (theoretically correct MPPI)
+2. **Quintic spline representation**: Maintains smooth C² continuous trajectories
 
-### State-Space vs Control-Space MPPI
+This design preserves the benefits of both approaches: theoretical correctness from MPPI framework and smooth structured trajectories from spline planning.
 
-| Aspect | State-Space MPPI | Control-Space MPPI |
-|--------|------------------|---------------------|
-| **Sampling** | Spline coefficients + foot positions | Control inputs (accelerations) |
-| **Dynamics** | Implicit (through constraints) | Explicit (forward integration) |
+### State-Space vs Hybrid Control-Space MPPI
+
+| Aspect | State-Space MPPI | Hybrid Control-Space MPPI |
+|--------|------------------|----------------------------|
+| **Sampling** | Spline coefficients directly | Spline coefficients as controls |
+| **Framework** | Parameter optimization | Control-space MPPI |
+| **Trajectories** | Quintic splines (C² continuous) | Quintic splines (C² continuous) |
 | **Theory** | Approximate MPPI | Theoretically correct MPPI |
-| **Physics** | Must enforce via penalties | Naturally satisfied |
+| **Constraints** | Soft penalties | Soft penalties along splines |
 | **Computation** | NumPy (CPU-based) | PyTorch (GPU-accelerated) |
 
 ## Architecture
 
 ### Core Components
 
-1. **`ControlSpaceMPPI`**: Generic control-space MPPI optimizer
+1. **`SplineControlMPPI`**: Hybrid spline-based control-space MPPI optimizer
+   - Samples quintic spline coefficients as control inputs
+   - Position splines: `(n_phases, 3, 6)` coefficients
+   - Rotation splines: `(n_phases, 3, 6)` coefficients
+   - Foot positions: `(4, 3)`
+   - Evaluates constraints along generated smooth trajectories
+
+2. **`ControlSpaceMPPI`**: Generic control-space MPPI (legacy, for raw acceleration sampling)
    - Handles control sampling and trajectory rollouts
    - Device-agnostic (CPU/GPU)
    - Applies to any control problem with differentiable dynamics
 
-2. **`QuadrupedControlSpaceMPPI`**: Specialized for quadruped locomotion
-   - Integrates with TAMOLS framework
-   - Implements quadruped-specific dynamics and costs
-   - Provides trajectory generation utilities
-
 3. **`TAMOLS` integration**: Unified interface
    - Toggle between state-space and control-space via `use_control_space_mppi` flag
+   - Control-space now uses hybrid spline-based approach
    - Maintains API compatibility
    - Seamless switching for comparison
 
 ## How It Works
 
-### 1. Control Sampling
+### 1. Control Sampling (Hybrid Spline-Based)
 
-At each MPPI iteration, the algorithm samples perturbations around the current control mean:
+At each MPPI iteration, the algorithm samples perturbations of spline coefficients:
 
 ```python
-# Sample noise from Gaussian distribution
-noise = torch.randn((num_samples, horizon, control_dim)) * noise_sigma
+# Sample noise for spline coefficients
+noise = torch.randn((num_samples, control_dim)) * noise_sigma
 
-# Generate control samples
+# Generate control samples (spline coefficients + feet)
 controls = control_mean + noise
 
 # Clamp to bounds
 controls = torch.clamp(controls, control_lb, control_ub)
 ```
 
-**Control vector (6D):**
-- Linear acceleration: `[ax, ay, az]` (m/s²)
-- Angular acceleration: `[alpha_x, alpha_y, alpha_z]` (rad/s²)
-
-### 2. Forward Dynamics Propagation
-
-Each control sample is integrated through dynamics to generate a trajectory:
-
+**Control vector structure:**
 ```python
-def dynamics_fn(state, control):
-    # Extract state components
-    pos, rot, vel, ang_vel, feet = extract_state(state)
-    acc, ang_acc = extract_control(control)
-    
-    # Add gravity
-    total_acc = acc + gravity
-    
-    # Euler integration
-    new_vel = vel + total_acc * dt
-    new_pos = pos + vel * dt + 0.5 * total_acc * dt^2
-    
-    new_ang_vel = ang_vel + ang_acc * dt
-    new_rot = rot + ang_vel * dt + 0.5 * ang_acc * dt^2
-    
-    return new_state
+control = {
+    'a_pos': (n_phases, 3, n_coeffs),  # Position spline coefficients
+    'a_rot': (n_phases, 3, n_coeffs),  # Rotation spline coefficients  
+    'feet': (4, 3)                     # Foot positions
+}
 ```
 
-**State vector (24D):**
-- Base pose: `[x, y, z, roll, pitch, yaw]` (6D)
-- Base velocity: `[vx, vy, vz, wx, wy, wz]` (6D)
-- Foot positions: 4 × 3D = 12D
+For quintic splines (order=5): `n_coeffs = 6` (coefficients c₀, c₁, c₂, c₃, c₄, c₅)
+
+### 2. Spline Trajectory Generation
+
+Each control sample (spline coefficients) generates smooth C² continuous trajectories:
+
+```python
+def evaluate_spline_position(coeffs, t):
+    # Evaluate quintic polynomial: p(t) = Σ cᵢ·tⁱ
+    t_powers = [1, t, t², t³, t⁴, t⁵]
+    return sum(coeffs[i] * t_powers[i] for i in range(6))
+
+def evaluate_spline_velocity(coeffs, t):
+    # First derivative: p'(t) = Σ i·cᵢ·t^(i-1)
+    t_powers = [0, 1, 2t, 3t², 4t³, 5t⁴]
+    return sum(coeffs[i] * t_powers[i] for i in range(6))
+
+def evaluate_spline_acceleration(coeffs, t):
+    # Second derivative: p''(t) = Σ i·(i-1)·cᵢ·t^(i-2)
+    t_powers = [0, 0, 2, 6t, 12t², 20t³]
+    return sum(coeffs[i] * t_powers[i] for i in range(6))
+```
+
+**Trajectory evaluation:**
+- Evaluated at multiple timesteps per phase (typically 6)
+- Provides position, velocity, acceleration for constraint checking
+- Maintains smoothness across phase boundaries
 
 ### 3. Cost Evaluation
 
@@ -132,9 +145,9 @@ After optimization, the control sequence generates trajectories for:
 
 ## Usage
 
-### Option 1: Through TAMOLS Interface
+### Option 1: Through TAMOLS Interface (Recommended)
 
-Enable control-space MPPI when creating TAMOLS problem:
+Enable hybrid spline-based control-space MPPI when creating TAMOLS problem:
 
 ```python
 from tamols import TAMOLS
@@ -142,27 +155,29 @@ from tamols.tamols_dataclasses import Gait, Terrain, Robot
 
 problem = TAMOLS(
     gait, terrain, robot,
-    use_control_space_mppi=True,  # Enable control-space MPPI
-    control_horizon=20,            # Planning horizon
+    use_control_space_mppi=True,  # Enable hybrid spline-based control-space MPPI
     num_samples=1000,              # Samples per iteration
     num_iterations=50,             # Max iterations
     temperature=1.0,               # Exploration parameter
-    noise_sigma=0.1,               # Control noise std
+    noise_sigma=0.1,               # Spline coefficient noise std
 )
 
-# Run optimization (automatically uses control-space)
+# Run optimization (automatically uses hybrid spline approach)
 sols, infos = problem.run_repeated_optimizations()
 ```
 
-### Option 2: Direct Usage
+**Note**: The `control_horizon` parameter is no longer needed. The approach now uses 
+the gait's `n_phases` and `spline_order` parameters directly.
 
-Use `QuadrupedControlSpaceMPPI` directly:
+### Option 2: Direct Usage of SplineControlMPPI
+
+Use `SplineControlMPPI` directly for custom applications:
 
 ```python
-from tamols.mppi_control_space import QuadrupedControlSpaceMPPI
+from tamols.mppi_spline_control import SplineControlMPPI
 
 # Create optimizer
-mppi = QuadrupedControlSpaceMPPI(
+mppi = SplineControlMPPI(
     gait=gait,
     terrain=terrain,
     robot=robot,
