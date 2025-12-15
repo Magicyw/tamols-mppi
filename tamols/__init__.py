@@ -27,6 +27,11 @@ from .manual_heightmaps import (
 
 from .plot_sol import plot_all_iterations, plot_base
 from .trajectory import get_trajectory_function
+from .mppi_control_space import (
+    ControlSpaceMPPI, 
+    QuadrupedControlSpaceMPPI,
+    extract_trajectory_from_control_rollout
+)
 
 __all__ = [
     'TAMOLS', 'build_initial_x0', 'update_state_from_solution',
@@ -36,5 +41,6 @@ __all__ = [
     'get_flat_heightmap', 'get_rough_terrain_heightmap', 'get_stairs_heightmap',
     'Gait', 'Terrain', 'Robot', 'CurrentState',
     'plot_all_iterations', 'get_trajectory_function',
-    'show_map', 'save_heightmap_to_png', 'get_heightmap_ramp', 'plot_base'
+    'show_map', 'save_heightmap_to_png', 'get_heightmap_ramp', 'plot_base',
+    'ControlSpaceMPPI', 'QuadrupedControlSpaceMPPI', 'extract_trajectory_from_control_rollout'
 ]

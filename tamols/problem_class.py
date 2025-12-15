@@ -26,7 +26,9 @@ class TAMOLS():
                  num_samples: int = 1000, num_iterations: int = 100,
                  temperature: float = 1.0, noise_sigma: float = 0.1,
                  w_eq: float = 1000.0, w_ineq: float = 1000.0,
-                 convergence_tol: float = 1e-6):
+                 convergence_tol: float = 1e-6,
+                 use_control_space_mppi: bool = False,
+                 control_horizon: int = 20):
 
         self.gait = gait
         self.terrain = terrain
@@ -147,6 +149,11 @@ class TAMOLS():
         # Constraint penalty weights
         self.w_eq = w_eq
         self.w_ineq = w_ineq
+        
+        # Control-space MPPI configuration
+        self.use_control_space_mppi = use_control_space_mppi
+        self.control_horizon = control_horizon
+        self._control_mppi = None  # Lazy initialization
 
      # -------- helpers used inside the objective --------
     def _cost_at_t(self, a_pos, a_rot, t, limb_center, T_k_phase):
@@ -530,6 +537,108 @@ class TAMOLS():
         
         return mppi_step
 
+    def _initialize_control_mppi(self):
+        """Lazy initialization of control-space MPPI optimizer."""
+        if self._control_mppi is None:
+            from .mppi_control_space import QuadrupedControlSpaceMPPI
+            self._control_mppi = QuadrupedControlSpaceMPPI(
+                gait=self.gait,
+                terrain=self.terrain,
+                robot=self.robot,
+                horizon=self.control_horizon,
+                num_samples=self.num_samples,
+                num_iterations=self.num_iterations,
+                temperature=self.temperature,
+                noise_sigma=self.noise_sigma,
+            )
+    
+    def _convert_state_to_control_space_format(self, cs: CurrentState) -> np.ndarray:
+        """
+        Convert CurrentState to format expected by control-space MPPI.
+        
+        Returns state vector: [pose(6), velocity(6), feet(12)]
+        """
+        state = np.concatenate([
+            np.asarray(cs.current_base_pose),      # 6D: [x, y, z, roll, pitch, yaw]
+            np.asarray(cs.current_base_velocity),  # 6D: [vx, vy, vz, wx, wy, wz]
+            np.asarray(cs.p_1_meas),              # 3D
+            np.asarray(cs.p_2_meas),              # 3D
+            np.asarray(cs.p_3_meas),              # 3D
+            np.asarray(cs.p_4_meas),              # 3D
+        ])
+        return state
+    
+    def run_control_space_optimization(self, options: dict | None = None):
+        """
+        Run control-space MPPI optimization.
+        
+        This uses the theoretically correct MPPI formulation by sampling control
+        inputs and propagating them through dynamics.
+        
+        Args:
+            options: Optional dictionary (for compatibility, not used)
+            
+        Returns:
+            x_sol: Solution in original state-space format (for compatibility)
+            info: Optimization information
+        """
+        self._initialize_control_mppi()
+        
+        # Convert current state to control-space format
+        initial_state = self._convert_state_to_control_space_format(self.current_state)
+        
+        # Target velocity from gait
+        target_velocity = np.concatenate([
+            np.asarray(self.gait.desired_base_velocity),
+            np.asarray(self.gait.desired_base_angular_velocity),
+        ])
+        
+        # Run control-space MPPI
+        optimal_controls, info = self._control_mppi.optimize_trajectory(
+            initial_state, target_velocity
+        )
+        
+        # Integrate controls to get trajectory
+        states, controls = self._control_mppi.integrate_controls_to_trajectory(
+            initial_state, optimal_controls
+        )
+        
+        # Convert trajectory back to original state-space format
+        # Extract final state from trajectory
+        final_state = states[-1]
+        
+        # Create a compatible solution in the original x format
+        # This is a simplified conversion - in practice, you might want to fit
+        # splines to the trajectory or use a more sophisticated approach
+        sv = self._unravel(self.x0)
+        
+        # Update foot positions from final state
+        sv["p_1"] = jnp.array(final_state[12:15])
+        sv["p_2"] = jnp.array(final_state[15:18])
+        sv["p_3"] = jnp.array(final_state[18:21])
+        sv["p_4"] = jnp.array(final_state[21:24])
+        
+        # Update spline coefficients to match trajectory
+        # For now, use simple constant/linear terms based on final state
+        final_pose = final_state[0:6]
+        final_vel = final_state[6:12]
+        
+        for phase in range(self.gait.n_phases):
+            # Set constant term to final pose
+            sv["a_pos"] = sv["a_pos"].at[phase, :, 0].set(final_pose[:3])
+            sv["a_rot"] = sv["a_rot"].at[phase, :, 0].set(final_pose[3:6])
+            # Set linear term to final velocity
+            sv["a_pos"] = sv["a_pos"].at[phase, :, 1].set(final_vel[:3])
+            sv["a_rot"] = sv["a_rot"].at[phase, :, 1].set(final_vel[3:6])
+        
+        x_sol, _ = ravel_pytree(sv)
+        x_sol = np.asarray(x_sol, dtype=float)
+        
+        # Update info with original objective
+        info['obj_val'] = float(self.compute_objective(jnp.asarray(x_sol), self.current_state))
+        
+        return x_sol, info
+
     # Solve helper
     def run_single_optimization(self, options: dict | None = None, seed: int | None = None):
         """Run MPPI optimization.
@@ -538,6 +647,10 @@ class TAMOLS():
             options: Optional dictionary (for compatibility with old interface, not used)
             seed: Random seed for MPPI sampling. If None, uses time-based seed.
         """
+        # Use control-space MPPI if enabled
+        if self.use_control_space_mppi:
+            return self.run_control_space_optimization(options)
+        
         x0 = self.x0
         
         # Create MPPI step function (JIT-compiled)
