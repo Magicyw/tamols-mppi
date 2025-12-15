@@ -3,8 +3,7 @@ import numpy as np
 import jax.numpy as jnp
 from .cost_parts import *
 from jax.flatten_util import ravel_pytree
-from jax import vmap, jit, value_and_grad, jacfwd, jacrev
-import cyipopt
+from jax import vmap, jit, value_and_grad, jacfwd, jacrev, random
 from .helpers import (
     evaluate_spline_position,
     evaluate_spline_velocity,
@@ -128,45 +127,18 @@ class TAMOLS():
         _, self._unravel = ravel_pytree(tpl)
 
         # Param-aware (x, current_state) functions; no closure over current_state
-        self._f_valgrad = jit(value_and_grad(lambda x, cs: self.compute_objective(x, cs)))
         self._c_eq      = jit(lambda x, cs: self.compute_eq_constraints(x, cs))
         self._c_ineq    = jit(lambda x, cs: self.compute_ineq_constraints(x, cs))
-        self._c_all     = jit(lambda x, cs: jnp.concatenate([self._c_eq(x, cs), self._c_ineq(x, cs)]))
-        self._J_all     = jit(jacfwd(lambda x, cs: self._c_all(x, cs), argnums=0))
-        self._hess_L    = jit(jacfwd(jacrev(lambda x, lam, rho, cs:
-                                             rho * self.compute_objective(x, cs)
-                                             + jnp.dot(lam, self._c_all(x, cs)),
-                                           argnums=0),
-                                     argnums=0))
 
-        x0_j = jnp.asarray(x0)
-        c_eq0 = self._c_eq(x0_j, self.current_state)
-        c_in0 = self._c_ineq(x0_j, self.current_state)
-        m_eq   = int(np.asarray(c_eq0).size)
-        m_ineq = int(np.asarray(c_in0).size)
-        self.m = m_eq + m_ineq
-        self.cl = np.concatenate([
-            np.zeros(m_eq, dtype=float),
-            np.zeros(m_ineq, dtype=float)
-        ])
-        self.cu = np.concatenate([
-            np.zeros(m_eq, dtype=float),
-            np.full(m_ineq, np.inf, dtype=float)
-        ])
-
-        # Dense Jacobian structure (row-major)
-        if self.m > 0:
-            rows = np.repeat(np.arange(self.m), self.n).astype(np.int64)
-            cols = np.tile(np.arange(self.n), self.m).astype(np.int64)
-        else:
-            rows = np.array([], dtype=np.int64)
-            cols = np.array([], dtype=np.int64)
-        self._jac_rows, self._jac_cols = rows, cols
-
-        # Lower-triangular sparsity pattern (Ipopt expects symmetric lower triangle)
-        tri = np.tril_indices(self.n)
-        self._H_rows = tri[0].astype(np.int64)
-        self._H_cols = tri[1].astype(np.int64)
+        # MPPI hyperparameters
+        self.num_samples = 1000
+        self.num_iterations = 100
+        self.temperature = 1.0
+        self.noise_sigma = 0.1
+        
+        # Constraint penalty weights
+        self.w_eq = 1000.0
+        self.w_ineq = 1000.0
 
      # -------- helpers used inside the objective --------
     def _cost_at_t(self, a_pos, a_rot, t, limb_center, T_k_phase):
@@ -487,64 +459,85 @@ class TAMOLS():
 
         return jnp.concatenate([fric, kin, az_g, slack_var_constr, dyn_ineq, dyn_eq, giac])
     
-    # ============== Ipopt callbacks ==============
-    def objective(self, x):
-        v, _ = self._f_valgrad(jnp.asarray(x), self.current_state)
-        return float(v)
+    # ============== MPPI-specific methods ==============
+    def compute_total_cost(self, x: jnp.ndarray, cs: CurrentState) -> jnp.ndarray:
+        """Compute total cost including objective and soft constraint penalties."""
+        # Original objective
+        obj = self.compute_objective(x, cs)
+        
+        # Equality constraints: penalize ||h(x)||^2
+        c_eq = self._c_eq(x, cs)
+        eq_penalty = self.w_eq * jnp.sum(c_eq ** 2)
+        
+        # Inequality constraints: penalize ||ReLU(-g(x))||^2
+        # g(x) >= 0 is desired, so penalize negative values
+        c_ineq = self._c_ineq(x, cs)
+        ineq_violation = jnp.maximum(0.0, -c_ineq)  # ReLU(-g(x))
+        ineq_penalty = self.w_ineq * jnp.sum(ineq_violation ** 2)
+        
+        return obj + eq_penalty + ineq_penalty
 
-    def gradient(self, x):
-        _, g = self._f_valgrad(jnp.asarray(x), self.current_state)
-        return np.asarray(g, dtype=float)
-
-    def constraints(self, x):
-        c = self._c_all(jnp.asarray(x), self.current_state)
-        return np.asarray(c, dtype=float)
-
-    def jacobian(self, x):
-        if self.m == 0:
-            return np.array([], dtype=float)
-        J = self._J_all(jnp.asarray(x), self.current_state)
-        return np.asarray(J, dtype=float).ravel(order="C")
-
-    def jacobianstructure(self):
-        if self.m == 0:
-            return (np.array([], dtype=np.int64), np.array([], dtype=np.int64))
-        return (self._jac_rows, self._jac_cols)
-
-    def hessianstructure(self):
-        # Lower-triangular structure
-        return (self._H_rows, self._H_cols)
-
-    def hessian(self, x, lagrange, obj_factor):
-        H = self._hess_L(jnp.asarray(x),
-                        jnp.asarray(lagrange),
-                        jnp.asarray(obj_factor),
-                        self.current_state)
-        H = np.asarray(H, dtype=float)
-        return H[(self._H_rows, self._H_cols)]
+    # MPPI helper - JIT-compiled step function
+    def _create_mppi_step(self):
+        """Create JIT-compiled MPPI step function."""
+        lb_jax = jnp.asarray(self.lb)
+        ub_jax = jnp.asarray(self.ub)
+        num_samples = self.num_samples
+        temperature = self.temperature
+        noise_sigma = self.noise_sigma
+        
+        @jit
+        def mppi_step(key, x_mean, cs):
+            # Sample perturbations
+            key, subkey = random.split(key)
+            noise = random.normal(subkey, shape=(num_samples, x_mean.shape[0])) * noise_sigma
+            
+            # Generate samples and clamp to bounds
+            samples = x_mean[None, :] + noise  # (num_samples, n)
+            samples = jnp.clip(samples, lb_jax, ub_jax)
+            
+            # Compute costs for all samples
+            def cost_fn(x_sample):
+                return self.compute_total_cost(x_sample, cs)
+            
+            costs = vmap(cost_fn)(samples)  # (num_samples,)
+            
+            # Compute weights using softmax with temperature
+            min_cost = jnp.min(costs)
+            exp_weights = jnp.exp(-(costs - min_cost) / temperature)
+            weights = exp_weights / jnp.sum(exp_weights)
+            
+            # Weighted mean update
+            x_new = jnp.sum(weights[:, None] * samples, axis=0)
+            
+            return key, x_new, jnp.mean(costs)
+        
+        return mppi_step
 
     # Solve helper
     def run_single_optimization(self, options: dict | None = None):
+        """Run MPPI optimization."""
         x0 = self.x0
-        nlp = cyipopt.Problem(
-            n=self.n, m=self.m, problem_obj=self,
-            lb=self.lb, ub=self.ub, cl=self.cl, cu=self.cu
-        )
-        ipopt_opts = {
-            "hessian_approximation": "exact",
-            "print_level": 0,      # silence IPOPT
-            "sb": "yes",           # (small banner) further reduce output
-            "max_iter": 300,
-            "tol": 1e-6,
-            "acceptable_tol": 1e-4,
-            "acceptable_iter": 3,
-            "print_timing_statistics": "no"
+        
+        # Create MPPI step function (JIT-compiled)
+        mppi_step = self._create_mppi_step()
+        
+        # Initialize
+        x_mean = jnp.asarray(x0, dtype=jnp.float32)
+        key = random.PRNGKey(42)
+        
+        # MPPI iterations
+        for iteration in range(self.num_iterations):
+            key, x_mean, avg_cost = mppi_step(key, x_mean, self.current_state)
+        
+        x_sol = np.asarray(x_mean, dtype=float)
+        
+        # Create info dict similar to cyipopt for compatibility
+        info = {
+            'status': 0,  # Success
+            'obj_val': float(self.compute_total_cost(jnp.asarray(x_sol), self.current_state))
         }
-        if options:
-            ipopt_opts.update(options)
-        for k, v in ipopt_opts.items():
-            nlp.add_option(k, v)
-        x_sol, info = nlp.solve(np.asarray(x0, dtype=float))
+        
         return x_sol, info
 
     def run_repeated_optimizations(self, warm_start: bool = True, options: dict | None = None):
@@ -586,8 +579,8 @@ class TAMOLS():
             opt_times.append(step_opt_time)
 
             sols.append(x_sol); infos.append(info)
-            final_obj = self.objective(x_sol)
-            print(f"Optimization {k+1}/{n_steps}: objective = {final_obj:.6f}")
+            final_obj = self.compute_objective(jnp.asarray(x_sol), self.current_state)
+            print(f"Optimization {k+1}/{n_steps}: objective = {float(final_obj):.6f}")
 
             sv_sol = self._unravel(jnp.asarray(x_sol))
             next_state = update_state_from_solution(self, sv_sol)
