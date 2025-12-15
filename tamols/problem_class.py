@@ -1,5 +1,8 @@
 from .tamols_dataclasses import *
 import numpy as np
+import jax
+# Enable 64-bit precision for JAX (important for numerical stability in optimization)
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from .cost_parts import *
 from jax.flatten_util import ravel_pytree
@@ -461,7 +464,15 @@ class TAMOLS():
     
     # ============== MPPI-specific methods ==============
     def compute_total_cost(self, x: jnp.ndarray, cs: CurrentState) -> jnp.ndarray:
-        """Compute total cost including objective and soft constraint penalties."""
+        """Compute total cost including objective and soft constraint penalties.
+        
+        Uses soft penalties to handle constraints in the sampling-based MPPI framework:
+        - Equality constraints h(x) = 0: penalized as w_eq * ||h(x)||^2
+        - Inequality constraints g(x) >= 0: penalized as w_ineq * ||ReLU(-g(x))||^2
+        
+        Note: All constraints from compute_ineq_constraints are in g(x) >= 0 format,
+        including the dynamically-transformed equality constraints with slack variables.
+        """
         # Original objective
         obj = self.compute_objective(x, cs)
         
@@ -470,7 +481,7 @@ class TAMOLS():
         eq_penalty = self.w_eq * jnp.sum(c_eq ** 2)
         
         # Inequality constraints: penalize ||ReLU(-g(x))||^2
-        # g(x) >= 0 is desired, so penalize negative values
+        # All constraints from compute_ineq_constraints are in g(x) >= 0 format
         c_ineq = self._c_ineq(x, cs)
         ineq_violation = jnp.maximum(0.0, -c_ineq)  # ReLU(-g(x))
         ineq_penalty = self.w_ineq * jnp.sum(ineq_violation ** 2)
@@ -515,16 +526,26 @@ class TAMOLS():
         return mppi_step
 
     # Solve helper
-    def run_single_optimization(self, options: dict | None = None):
-        """Run MPPI optimization."""
+    def run_single_optimization(self, options: dict | None = None, seed: int | None = None):
+        """Run MPPI optimization.
+        
+        Args:
+            options: Optional dictionary (for compatibility with old interface, not used)
+            seed: Random seed for MPPI sampling. If None, uses time-based seed.
+        """
         x0 = self.x0
         
         # Create MPPI step function (JIT-compiled)
         mppi_step = self._create_mppi_step()
         
-        # Initialize
-        x_mean = jnp.asarray(x0, dtype=jnp.float32)
-        key = random.PRNGKey(42)
+        # Initialize with configurable seed
+        if seed is None:
+            import time as time_module
+            seed = int(time_module.time() * 1000000) % (2**32)
+        key = random.PRNGKey(seed)
+        
+        # Use float64 for better precision
+        x_mean = jnp.asarray(x0, dtype=jnp.float64)
         
         # MPPI iterations
         for iteration in range(self.num_iterations):
@@ -533,9 +554,10 @@ class TAMOLS():
         x_sol = np.asarray(x_mean, dtype=float)
         
         # Create info dict similar to cyipopt for compatibility
+        # Store the original objective (without penalties) for consistency
         info = {
             'status': 0,  # Success
-            'obj_val': float(self.compute_total_cost(jnp.asarray(x_sol), self.current_state))
+            'obj_val': float(self.compute_objective(jnp.asarray(x_sol), self.current_state))
         }
         
         return x_sol, info
