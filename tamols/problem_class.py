@@ -25,7 +25,8 @@ class TAMOLS():
                  x_lb: np.ndarray = None, x_ub: np.ndarray = None,
                  num_samples: int = 1000, num_iterations: int = 100,
                  temperature: float = 1.0, noise_sigma: float = 0.1,
-                 w_eq: float = 1000.0, w_ineq: float = 1000.0):
+                 w_eq: float = 1000.0, w_ineq: float = 1000.0,
+                 convergence_tol: float = 1e-6):
 
         self.gait = gait
         self.terrain = terrain
@@ -141,6 +142,7 @@ class TAMOLS():
         self.num_iterations = num_iterations
         self.temperature = temperature
         self.noise_sigma = noise_sigma
+        self.convergence_tol = convergence_tol
         
         # Constraint penalty weights
         self.w_eq = w_eq
@@ -543,7 +545,8 @@ class TAMOLS():
         
         # Initialize with configurable seed
         if seed is None:
-            seed = int(time.time() * 1000000) % (2**32)
+            import random as py_random
+            seed = py_random.randint(0, 2**32 - 1)
         key = random.PRNGKey(seed)
         
         # Use float64 for better precision
@@ -551,7 +554,6 @@ class TAMOLS():
         
         # MPPI iterations with convergence tracking
         prev_cost = float('inf')
-        cost_improvement_threshold = 1e-6
         converged = False
         
         for iteration in range(self.num_iterations):
@@ -559,18 +561,20 @@ class TAMOLS():
             
             # Check convergence based on cost improvement
             cost_improvement = abs(prev_cost - float(avg_cost))
-            if cost_improvement < cost_improvement_threshold and iteration > 0:
+            if cost_improvement < self.convergence_tol and iteration > 0:
                 converged = True
                 break
             prev_cost = float(avg_cost)
         
         x_sol = np.asarray(x_mean, dtype=float)
         
-        # Create info dict similar to cyipopt for compatibility
+        # Create info dict similar to cyipopt/scipy.optimize for compatibility
         # Store the original objective (without penalties) for consistency
+        # Status: 0 = success/converged, 1 = max iterations reached
         info = {
-            'status': 0 if converged else 1,  # 0 = converged, 1 = max iterations
-            'obj_val': float(self.compute_objective(jnp.asarray(x_sol), self.current_state))
+            'status': 0 if converged else 1,
+            'obj_val': float(self.compute_objective(jnp.asarray(x_sol), self.current_state)),
+            'message': 'Optimization converged' if converged else 'Maximum iterations reached'
         }
         
         return x_sol, info
