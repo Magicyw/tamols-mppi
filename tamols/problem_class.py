@@ -535,12 +535,11 @@ class TAMOLS():
     def _initialize_control_mppi(self):
         """Lazy initialization of control-space MPPI optimizer."""
         if self._control_mppi is None:
-            from .mppi_control_space import QuadrupedControlSpaceMPPI
-            self._control_mppi = QuadrupedControlSpaceMPPI(
+            from .mppi_spline_control import SplineControlMPPI
+            self._control_mppi = SplineControlMPPI(
                 gait=self.gait,
                 terrain=self.terrain,
                 robot=self.robot,
-                horizon=self.control_horizon,
                 num_samples=self.num_samples,
                 num_iterations=self.num_iterations,
                 temperature=self.temperature,
@@ -565,66 +564,65 @@ class TAMOLS():
     
     def run_control_space_optimization(self, options: dict | None = None):
         """
-        Run control-space MPPI optimization.
+        Run control-space MPPI optimization with quintic spline representation.
         
-        This uses the theoretically correct MPPI formulation by sampling control
-        inputs and propagating them through dynamics.
+        This uses a hybrid approach that combines:
+        - Control-space MPPI sampling (theoretically correct)
+        - Quintic spline trajectory representation (smooth and structured)
         
         Args:
             options: Optional dictionary (for compatibility, not used)
             
         Returns:
-            x_sol: Solution in original state-space format (for compatibility)
+            x_sol: Solution in original state-space format (spline coefficients + feet)
             info: Optimization information
         """
         self._initialize_control_mppi()
         
-        # Convert current state to control-space format
-        initial_state = self._convert_state_to_control_space_format(self.current_state)
+        # Prepare initial state dictionary
+        initial_state = {
+            'current_base_pose': self.current_state.current_base_pose,
+            'current_base_velocity': self.current_state.current_base_velocity,
+            'p_1': self.current_state.p_1_meas,
+            'p_2': self.current_state.p_2_meas,
+            'p_3': self.current_state.p_3_meas,
+            'p_4': self.current_state.p_4_meas,
+        }
         
-        # Target velocity from gait
-        target_velocity = np.concatenate([
-            np.asarray(self.gait.desired_base_velocity),
-            np.asarray(self.gait.desired_base_angular_velocity),
-        ])
+        # Initialize control mean with current solution
+        sv_init = self._unravel(self.x0)
         
-        # Run control-space MPPI
-        optimal_controls, info = self._control_mppi.optimize_trajectory(
-            initial_state, target_velocity
+        # Pack into flat control vector
+        control_init = []
+        control_init.append(sv_init['a_pos'].ravel())
+        control_init.append(sv_init['a_rot'].ravel())
+        control_init.append(np.stack([sv_init['p_1'], sv_init['p_2'], 
+                                      sv_init['p_3'], sv_init['p_4']]).ravel())
+        
+        import torch
+        self._control_mppi.control_mean = torch.tensor(
+            np.concatenate(control_init), 
+            device=self._control_mppi.device, 
+            dtype=torch.float32
         )
         
-        # Integrate controls to get trajectory
-        states, controls = self._control_mppi.integrate_controls_to_trajectory(
-            initial_state, optimal_controls
+        # Run spline-based control-space MPPI
+        optimal_control, info = self._control_mppi.optimize(initial_state)
+        
+        # Unpack optimal control back to state-space format
+        sv_opt = self._control_mppi.unpack_control(
+            torch.tensor(optimal_control, device=self._control_mppi.device)
         )
         
-        # Convert trajectory back to original state-space format
-        # Extract final state from trajectory
-        final_state = states[-1]
-        
-        # Create a compatible solution in the original x format
-        # This is a simplified conversion - in practice, you might want to fit
-        # splines to the trajectory or use a more sophisticated approach
+        # Convert tensors to numpy and build solution vector
         sv = self._unravel(self.x0)
-        
-        # Update foot positions from final state
-        sv["p_1"] = np.array(final_state[12:15])
-        sv["p_2"] = np.array(final_state[15:18])
-        sv["p_3"] = np.array(final_state[18:21])
-        sv["p_4"] = np.array(final_state[21:24])
-        
-        # Update spline coefficients to match trajectory
-        # For now, use simple constant/linear terms based on final state
-        final_pose = final_state[0:6]
-        final_vel = final_state[6:12]
-        
-        for phase in range(self.gait.n_phases):
-            # Set constant term to final pose
-            sv["a_pos"][phase, :, 0] = final_pose[:3]
-            sv["a_rot"][phase, :, 0] = final_pose[3:6]
-            # Set linear term to final velocity
-            sv["a_pos"][phase, :, 1] = final_vel[:3]
-            sv["a_rot"][phase, :, 1] = final_vel[3:6]
+        sv['a_pos'] = sv_opt['a_pos'].cpu().numpy()
+        sv['a_rot'] = sv_opt['a_rot'].cpu().numpy()
+        feet_opt = sv_opt['feet'].cpu().numpy()
+        sv['p_1'] = feet_opt[0]
+        sv['p_2'] = feet_opt[1]
+        sv['p_3'] = feet_opt[2]
+        sv['p_4'] = feet_opt[3]
         
         x_sol, _ = ravel_pytree(sv)
         x_sol = np.asarray(x_sol, dtype=float)

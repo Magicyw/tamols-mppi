@@ -32,6 +32,7 @@ from .mppi_control_space import (
     QuadrupedControlSpaceMPPI,
     extract_trajectory_from_control_rollout
 )
+from .mppi_spline_control import SplineControlMPPI
 
 __all__ = [
     'TAMOLS', 'build_initial_x0', 'update_state_from_solution',
@@ -42,5 +43,6 @@ __all__ = [
     'Gait', 'Terrain', 'Robot', 'CurrentState',
     'plot_all_iterations', 'get_trajectory_function',
     'show_map', 'save_heightmap_to_png', 'get_heightmap_ramp', 'plot_base',
-    'ControlSpaceMPPI', 'QuadrupedControlSpaceMPPI', 'extract_trajectory_from_control_rollout'
+    'ControlSpaceMPPI', 'QuadrupedControlSpaceMPPI', 'extract_trajectory_from_control_rollout',
+    'SplineControlMPPI'
 ]
