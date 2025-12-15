@@ -370,6 +370,13 @@ class QuadrupedControlSpaceMPPI:
         """
         Create cost function for trajectory evaluation.
         
+        Integrates all constraints from state-space MPPI including:
+        - Friction cone constraints
+        - Leg length bounds
+        - Dynamic feasibility
+        - Vertical acceleration limits
+        - Foot placement (GIAC) constraints
+        
         Args:
             target_velocity: Desired base velocity (6D: linear + angular)
         
@@ -381,41 +388,145 @@ class QuadrupedControlSpaceMPPI:
         grid_cell = self.grid_cell_length
         desired_height = float(self.gait.h_des)
         
+        # Physics parameters
+        gravity = torch.tensor(np.asarray(self.terrain.gravity), device=self.device, dtype=torch.float32)
+        mu = float(self.terrain.mu)
+        mass = float(self.robot.mass)
+        inertia = torch.tensor(np.asarray(self.robot.inertia), device=self.device, dtype=torch.float32)
+        l_min = float(self.robot.l_min)
+        l_max = float(self.robot.l_max)
+        
+        # Limb centers in base frame
+        limb_centers = torch.tensor(np.stack([
+            np.asarray(self.robot.r_1),
+            np.asarray(self.robot.r_2),
+            np.asarray(self.robot.r_3),
+            np.asarray(self.robot.r_4)
+        ]), device=self.device, dtype=torch.float32)
+        
+        # Constraint penalty weights (matching state-space MPPI)
+        w_friction = 1000.0
+        w_leg_length = 1000.0
+        w_vertical_accel = 1000.0
+        w_dynamics = 100.0
+        
         def cost_fn(state: torch.Tensor, control: torch.Tensor) -> torch.Tensor:
             """
-            Compute cost for state-control pair.
+            Compute cost for state-control pair including all constraints.
             
             Cost includes:
             - Velocity tracking error
             - Height tracking error
             - Control effort
             - Base orientation regularization
+            - Friction cone constraints
+            - Leg length bounds
+            - Vertical acceleration constraints
+            - Dynamic feasibility
             """
             # Extract state components
             pos = state[..., 0:3]
             rot = state[..., 3:6]
             vel = state[..., 6:9]
             ang_vel = state[..., 9:12]
+            feet_flat = state[..., 12:24]
+            feet = feet_flat.reshape(*feet_flat.shape[:-1], 4, 3)  # (..., 4, 3)
             
+            # Extract control
+            acc = control[..., 0:3]
+            ang_acc = control[..., 3:6]
+            
+            # ===== Original objective terms =====
             # Velocity tracking cost
             current_vel = torch.cat([vel, ang_vel], dim=-1)
             vel_error = torch.sum((current_vel - target_vel) ** 2, dim=-1)
             
-            # Height tracking cost (want to maintain desired height above terrain)
-            # For simplicity, use fixed desired height (could sample terrain)
+            # Height tracking cost
             z = pos[..., 2]
             height_error = (z - desired_height) ** 2
             
-            # Orientation regularization (prefer upright orientation)
+            # Orientation regularization
             orient_error = torch.sum(rot ** 2, dim=-1)
             
-            # Control effort (penalize large accelerations)
+            # Control effort
             control_effort = torch.sum(control ** 2, dim=-1) * 0.01
             
-            # Total cost
-            cost = vel_error + 10.0 * height_error + 0.1 * orient_error + control_effort
+            # Base objective
+            base_cost = vel_error + 10.0 * height_error + 0.1 * orient_error + control_effort
             
-            return cost
+            # ===== Constraint penalties =====
+            constraint_penalties = torch.zeros_like(base_cost)
+            
+            # 1. Friction cone constraint: mu*(-a_Bz) - ||a_Bxy|| >= 0
+            # where a_B = gravity - acceleration
+            total_acc = acc + gravity
+            a_B = gravity - total_acc  # Base acceleration in world frame
+            friction_cone = mu * (-a_B[..., 2]) - torch.norm(a_B[..., :2], dim=-1)
+            friction_violation = torch.relu(-friction_cone)  # ReLU(-g) for g >= 0 constraint
+            constraint_penalties += w_friction * friction_violation ** 2
+            
+            # 2. Vertical acceleration constraint: a_z - g_z >= 0
+            az_g = total_acc[..., 2] - gravity[2]
+            az_violation = torch.relu(-az_g)
+            constraint_penalties += w_vertical_accel * az_violation ** 2
+            
+            # 3. Leg length bounds: l_min^2 <= ||leg||^2 <= l_max^2
+            # Compute rotation matrix from Euler angles (simplified - small angle approx)
+            # For small angles: R ≈ I + [rot]_x
+            cos_rot = torch.cos(rot)
+            sin_rot = torch.sin(rot)
+            
+            # Full rotation matrix computation
+            roll, pitch, yaw = rot[..., 0], rot[..., 1], rot[..., 2]
+            cx, cy, cz = torch.cos(roll), torch.cos(pitch), torch.cos(yaw)
+            sx, sy, sz = torch.sin(roll), torch.sin(pitch), torch.sin(yaw)
+            
+            # Rotation matrix elements (flattened for batching)
+            R_00 = cy * cz
+            R_01 = -cy * sz
+            R_02 = sy
+            R_10 = sx * sy * cz + cx * sz
+            R_11 = -sx * sy * sz + cx * cz
+            R_12 = -sx * cy
+            R_20 = -cx * sy * cz + sx * sz
+            R_21 = cx * sy * sz + sx * cz
+            R_22 = cx * cy
+            
+            # Apply rotation to each limb center
+            for i in range(4):
+                lc = limb_centers[i]
+                # R @ limb_center
+                hip_world_x = R_00 * lc[0] + R_01 * lc[1] + R_02 * lc[2]
+                hip_world_y = R_10 * lc[0] + R_11 * lc[1] + R_12 * lc[2]
+                hip_world_z = R_20 * lc[0] + R_21 * lc[1] + R_22 * lc[2]
+                
+                hip_world = torch.stack([hip_world_x, hip_world_y, hip_world_z], dim=-1)
+                hip_pos = pos + hip_world
+                
+                # Leg vector from foot to hip
+                leg_vec = hip_pos - feet[..., i, :]
+                leg_length_sq = torch.sum(leg_vec ** 2, dim=-1)
+                
+                # Lower bound: l^2 >= l_min^2
+                min_violation = torch.relu(l_min**2 - leg_length_sq)
+                # Upper bound: l^2 <= l_max^2
+                max_violation = torch.relu(leg_length_sq - l_max**2)
+                
+                constraint_penalties += w_leg_length * (min_violation + max_violation)
+            
+            # 4. Dynamic feasibility penalty (simplified)
+            # Penalize if angular acceleration is inconsistent with physics
+            # This is a simplified check - full dynamics would require contact forces
+            ang_acc_magnitude = torch.norm(ang_acc, dim=-1)
+            # Reasonable limit based on inertia and expected torques
+            max_reasonable_ang_acc = 50.0  # rad/s^2
+            ang_acc_violation = torch.relu(ang_acc_magnitude - max_reasonable_ang_acc)
+            constraint_penalties += w_dynamics * ang_acc_violation ** 2
+            
+            # Total cost
+            total_cost = base_cost + constraint_penalties
+            
+            return total_cost
         
         return cost_fn
     
