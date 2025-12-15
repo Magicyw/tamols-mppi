@@ -58,7 +58,7 @@ The returned `info` dictionary includes:
 ## Usage Example
 
 ```python
-import jax.numpy as jnp
+import numpy as np
 from tamols import TAMOLS
 from tamols.tamols_dataclasses import Gait, Terrain, Robot
 from tamols.manual_heightmaps import get_stairs_heightmap
@@ -101,8 +101,8 @@ sols, infos = problem.run_repeated_optimizations(warm_start=True)
 
 ## Technical Details
 
-### JAX 64-bit Precision
-The implementation enables JAX's 64-bit precision mode for numerical stability. This is important for maintaining accuracy in the optimization process.
+### NumPy 64-bit Precision
+The implementation uses NumPy's 64-bit precision for numerical stability. This is important for maintaining accuracy in the optimization process.
 
 ### Random Seed
 By default, the solver uses a time-based random seed for each optimization. You can specify a fixed seed for reproducibility:
@@ -111,8 +111,8 @@ By default, the solver uses a time-based random seed for each optimization. You 
 x_sol, info = problem.run_single_optimization(seed=42)
 ```
 
-### JIT Compilation
-The MPPI step function is JIT-compiled for performance. The first call may be slower due to compilation, but subsequent calls are fast.
+### Performance
+The MPPI implementation uses NumPy for computation. For better performance, consider using the control-space MPPI with PyTorch GPU acceleration.
 
 ## Comparison with cyipopt
 

@@ -4,7 +4,7 @@ Trajectory Adaptive Multi-Objective Locomotion Solver using Model Predictive Pat
 
 This repository implements two MPPI approaches for quadruped locomotion:
 
-1. **State-Space MPPI** (JAX): Samples spline coefficients and foot positions directly
+1. **State-Space MPPI** (NumPy): Samples spline coefficients and foot positions directly
 2. **Control-Space MPPI** (PyTorch): Samples control inputs and propagates through dynamics (theoretically correct)
 
 ## Features

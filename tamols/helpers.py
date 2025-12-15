@@ -1,5 +1,5 @@
-from jax import jacfwd, jacrev
-import jax.numpy as jnp
+
+import numpy as np
 
 def euler_xyz_to_matrix(phi):
     """
@@ -7,10 +7,10 @@ def euler_xyz_to_matrix(phi):
     """
     roll, pitch, yaw = phi
 
-    cx, cy, cz = jnp.cos(roll), jnp.cos(pitch), jnp.cos(yaw)
-    sx, sy, sz = jnp.sin(roll), jnp.sin(pitch), jnp.sin(yaw)
+    cx, cy, cz = np.cos(roll), np.cos(pitch), np.cos(yaw)
+    sx, sy, sz = np.sin(roll), np.sin(pitch), np.sin(yaw)
     
-    R = jnp.array([
+    R = np.array([
         [cy*cz, -cy*sz, sy],
         [sx*sy*cz + cx*sz, -sx*sy*sz + cx*cz, -sx*cy],
         [-cx*sy*cz + sx*sz, cx*sy*sz + sx*cz, cx*cy]
@@ -33,15 +33,15 @@ def bilinear_interp(heightmap, p, cell_length):
     x = p[0] / cell_length + w / 2
     y = p[1] / cell_length + h / 2
 
-    x0 = jnp.floor(x).astype(int)
+    x0 = np.floor(x).astype(int)
     x1 = x0 + 1
-    y0 = jnp.floor(y).astype(int)
+    y0 = np.floor(y).astype(int)
     y1 = y0 + 1
 
-    x0 = jnp.clip(x0, 0, w - 1)
-    x1 = jnp.clip(x1, 0, w - 1)
-    y0 = jnp.clip(y0, 0, h - 1)
-    y1 = jnp.clip(y1, 0, h - 1)
+    x0 = np.clip(x0, 0, w - 1)
+    x1 = np.clip(x1, 0, w - 1)
+    y0 = np.clip(y0, 0, h - 1)
+    y1 = np.clip(y1, 0, h - 1)
 
     Q11 = heightmap[y0, x0]
     Q12 = heightmap[y1, x0]
@@ -67,8 +67,8 @@ def evaluate_spline_position(a, t):
         Position at time t (shape [d])
     """
     n = a.shape[1] - 1
-    t_powers = jnp.array([t**i for i in range(n + 1)])
-    return jnp.dot(a, t_powers)
+    t_powers = np.array([t**i for i in range(n + 1)])
+    return np.dot(a, t_powers)
 
 def evaluate_spline_velocity(a, t):
     """
@@ -81,8 +81,8 @@ def evaluate_spline_velocity(a, t):
         Velocity at time t (shape [d])
     """
     n = a.shape[1] - 1
-    t_powers = jnp.array([i * t**(i-1) if i >= 1 else 0 for i in range(n + 1)])
-    return jnp.dot(a, t_powers)
+    t_powers = np.array([i * t**(i-1) if i >= 1 else 0 for i in range(n + 1)])
+    return np.dot(a, t_powers)
 
 def evaluate_spline_acceleration(a, t):
     """
@@ -96,8 +96,8 @@ def evaluate_spline_acceleration(a, t):
     """
     n = a.shape[1] - 1
     # Compute second derivative coefficients: i*(i-1)*t**(i-2) for i >= 2, else 0
-    t_powers = jnp.array([i * (i - 1) * t**(i - 2) if i >= 2 else 0 for i in range(n + 1)])
-    return jnp.dot(a, t_powers)
+    t_powers = np.array([i * (i - 1) * t**(i - 2) if i >= 2 else 0 for i in range(n + 1)])
+    return np.dot(a, t_powers)
 
 def robust_norm(x, eps=1e-8):
     """
@@ -109,7 +109,7 @@ def robust_norm(x, eps=1e-8):
     Returns:
         Robust norm of x
     """
-    return jnp.sqrt(jnp.sum(x**2) + eps)
+    return np.sqrt(np.sum(x**2) + eps)
 
 def constraint_hess_vec(con_fun):
     def hess_vec(x, d_params, v):
@@ -129,12 +129,12 @@ def scalar_triple_product(a, b, c):
     Returns:
         Scalar triple product of a, b, c
     """
-    return jnp.dot(a, jnp.cross(b, c))
+    return np.dot(a, np.cross(b, c))
 
 def quat_to_rot(q):
     # q = [w, x, y, z]
     w,x,y,z = q
-    R = jnp.array([
+    R = np.array([
         [1-2*(y*y+z*z),  2*(x*y-w*z),    2*(x*z+w*y)],
         [2*(x*y+w*z),    1-2*(x*x+z*z),  2*(y*z-w*x)],
         [2*(x*z-w*y),    2*(y*z+w*x),    1-2*(x*x+y*y)]
@@ -144,14 +144,14 @@ def quat_to_rot(q):
 def transform_inertia(I_A, m, r, q):
     R = quat_to_rot(q)             # maps A->base
     I_rot = R @ I_A @ R.T          # inertia in base axes but about A origin
-    r = jnp.asarray(r).reshape(3,1)
-    I_pa = m * (jnp.dot(r.T, r).item() * jnp.eye(3) - (r @ r.T))
+    r = np.asarray(r).reshape(3,1)
+    I_pa = m * (np.dot(r.T, r).item() * np.eye(3) - (r @ r.T))
     I_base = I_rot + I_pa
     return I_base
 
-def euler_xyz_rates_to_body_omega_alpha(phi: jnp.ndarray,
-                                        phi_dot: jnp.ndarray,
-                                        phi_ddot: jnp.ndarray):
+def euler_xyz_rates_to_body_omega_alpha(phi: np.ndarray,
+                                        phi_dot: np.ndarray,
+                                        phi_ddot: np.ndarray):
     """
     Map Euler XYZ angle rates to body angular velocity/acceleration.
     Angles: phi = [roll_x, pitch_y, yaw_z] = [r, p, y]
@@ -162,23 +162,23 @@ def euler_xyz_rates_to_body_omega_alpha(phi: jnp.ndarray,
     r, p, y = phi
     r_d, p_d, y_d = phi_dot
     # Precompute trig
-    sr, cr = jnp.sin(r), jnp.cos(r)
-    sp, cp = jnp.sin(p), jnp.cos(p)
+    sr, cr = np.sin(r), np.cos(r)
+    sp, cp = np.sin(p), np.cos(p)
 
     # Mapping matrix E(r,p) for ZYX-intrinsic (roll-pitch-yaw) to body rates
-    E = jnp.array([
+    E = np.array([
         [1.0, 0.0,    -sp],
         [0.0,   cr,  sr*cp],
         [0.0,  -sr,  cr*cp],
     ])
 
     # Time derivative Ė = ∂E/∂r * ṙ + ∂E/∂p * ṗ
-    dE_dr = jnp.array([
+    dE_dr = np.array([
         [0.0,  0.0,          0.0],
         [0.0, -sr,      cr*cp],
         [0.0, -cr,     -sr*cp],
     ])
-    dE_dp = jnp.array([
+    dE_dp = np.array([
         [0.0,  0.0,        -cp],
         [0.0,  0.0,   -sr*sp],
         [0.0,  0.0,   -cr*sp],
@@ -189,16 +189,16 @@ def euler_xyz_rates_to_body_omega_alpha(phi: jnp.ndarray,
     alpha_b = E @ phi_ddot + E_dot @ phi_dot
     return omega_b, alpha_b
 
-def angular_momentum_dot_world_from_euler_xyz(phi: jnp.ndarray,
-                                              phi_dot: jnp.ndarray,
-                                              phi_ddot: jnp.ndarray,
-                                              inertia_body: jnp.ndarray):
+def angular_momentum_dot_world_from_euler_xyz(phi: np.ndarray,
+                                              phi_dot: np.ndarray,
+                                              phi_ddot: np.ndarray,
+                                              inertia_body: np.ndarray):
     """
     World-frame derivative: L̇_w = R(φ) · ḣ_b
     Uses euler_xyz_to_matrix only to rotate the body-vector to world.
     """
     omega_b, alpha_b = euler_xyz_rates_to_body_omega_alpha(phi, phi_dot, phi_ddot)
-    hdot_b = inertia_body @ alpha_b + jnp.cross(omega_b, inertia_body @ omega_b)
+    hdot_b = inertia_body @ alpha_b + np.cross(omega_b, inertia_body @ omega_b)
     R = euler_xyz_to_matrix(phi)
     return R @ hdot_b
 

@@ -74,7 +74,7 @@ def save_heightmap_to_png(heightmap, filepath, vmin=None, vmax=None, invert=Fals
     """Save a 2D heightmap array as an 8-bit grayscale PNG (black=low, white=high).
 
     Args:
-        heightmap: 2D array-like (NumPy or JAX DeviceArray) of shape (H, W).
+        heightmap: 2D array-like (NumPy array) of shape (H, W).
         filepath: Output file path (str or Path). Extension ".png" will be appended if missing.
         vmin: Optional lower bound for normalization. If None, uses heightmap min.
         vmax: Optional upper bound for normalization. If None, uses heightmap max.
@@ -92,7 +92,7 @@ def save_heightmap_to_png(heightmap, filepath, vmin=None, vmax=None, invert=Fals
     if Image is None:
         raise RuntimeError("Pillow (PIL) is required to save PNGs. Install with 'pip install Pillow'.")
 
-    arr = np.array(heightmap)  # Converts JAX DeviceArray transparently if needed
+    arr = np.array(heightmap)  # Ensure heightmap is a NumPy array
     if arr.ndim != 2:
         raise ValueError(f"Heightmap must be 2D, got shape {arr.shape}.")
 

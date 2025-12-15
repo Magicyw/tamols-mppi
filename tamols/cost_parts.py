@@ -1,4 +1,4 @@
-import jax.numpy as jnp
+import numpy as np
 from .manual_heightmaps import *
 from .helpers import *
 from .map_processing import *
@@ -12,7 +12,7 @@ def foothold_on_ground_cost(p, heightmap, grid_cell_length):
         return: cost of foothold position
     """
     height = bilinear_interp(heightmap, p, grid_cell_length)
-    return jnp.square(height - p[2])
+    return np.square(height - p[2])
 
 def leg_collision_avoidance_cost(p_i, p_j, eps_min):
     """
@@ -23,7 +23,7 @@ def leg_collision_avoidance_cost(p_i, p_j, eps_min):
         return: cost of leg collision avoidance
     """
     z = robust_norm((p_i - p_j)[:2])
-    return jnp.where(z < eps_min, jnp.square(eps_min - z), 0.0)
+    return np.where(z < eps_min, np.square(eps_min - z), 0.0)
 
 def nominal_kinematics_cost(p_B, p, h_des, r_B, R_B):
     """
@@ -35,8 +35,8 @@ def nominal_kinematics_cost(p_B, p, h_des, r_B, R_B):
 
         return: cost of nominal kinematics
     """
-    target = p_B + R_B @ r_B - jnp.array([0.0, 0.0, h_des])
-    return jnp.square(robust_norm(target - p))
+    target = p_B + R_B @ r_B - np.array([0.0, 0.0, h_des])
+    return np.square(robust_norm(target - p))
 
 def base_pose_alignment_cost(p_B, h_des, r_B, R_B, h_s2, grid_cell_length):
     """
@@ -48,10 +48,10 @@ def base_pose_alignment_cost(p_B, h_des, r_B, R_B, h_s2, grid_cell_length):
 
         return: cost of base pose alignment
     """
-    l_des = jnp.array([0.0, 0.0, h_des])    
+    l_des = np.array([0.0, 0.0, h_des])    
     h = bilinear_interp(h_s2, p_B + R_B @ r_B, grid_cell_length)
     # Align base with virtual floor
-    return jnp.square((p_B + R_B @ r_B - l_des)[2] - h)
+    return np.square((p_B + R_B @ r_B - l_des)[2] - h)
 
 def edge_avoidance_cost(grad_h_x, grad_h_y, grad_h_s1_x, grad_h_s1_y, p, grid_cell_length):
     """
@@ -64,16 +64,16 @@ def edge_avoidance_cost(grad_h_x, grad_h_y, grad_h_s1_x, grad_h_s1_y, p, grid_ce
 
         return: edge avoidance cost
     """
-    grad_h = jnp.array([
+    grad_h = np.array([
         bilinear_interp(grad_h_x, p, grid_cell_length),
         bilinear_interp(grad_h_y, p, grid_cell_length)
     ])
-    grad_h_s1 = jnp.array([
+    grad_h_s1 = np.array([
         bilinear_interp(grad_h_s1_x, p, grid_cell_length),
         bilinear_interp(grad_h_s1_y, p, grid_cell_length)
     ])
     # Use squared L2 norm for both gradients
-    return jnp.dot(grad_h, grad_h) + jnp.dot(grad_h_s1, grad_h_s1)
+    return np.dot(grad_h, grad_h) + np.dot(grad_h_s1, grad_h_s1)
 
 def previous_solution_cost(p, p_prev, eps=1.0e-8):
     """
@@ -81,7 +81,7 @@ def previous_solution_cost(p, p_prev, eps=1.0e-8):
         Returns ||p - p_prev||^2 + eps
     """
     diff = p - p_prev
-    return jnp.sum(jnp.square(diff)) + eps
+    return np.sum(np.square(diff)) + eps
 
 def tracking_cost(p_dot_B, phi_B, phi_B_dot, p_dot_desired, omega_desired, mass, inertia):
     """
@@ -99,7 +99,7 @@ def tracking_cost(p_dot_B, phi_B, phi_B_dot, p_dot_desired, omega_desired, mass,
     """
     R = euler_xyz_to_matrix(phi_B)
 
-    omega_b, _ = euler_xyz_rates_to_body_omega_alpha(phi_B, phi_B_dot, jnp.zeros(3))
+    omega_b, _ = euler_xyz_rates_to_body_omega_alpha(phi_B, phi_B_dot, np.zeros(3))
     omega_W = R @ omega_b  # Angular velocity of the base in world frame
 
     P_B = mass * p_dot_B # Linear momentum of the base in world frame
@@ -107,7 +107,7 @@ def tracking_cost(p_dot_B, phi_B, phi_B_dot, p_dot_desired, omega_desired, mass,
     L_B = R @ inertia @ R.T @ omega_W # Angular momentum of the base in world frame
     L_desired = R @ inertia @ R.T @ omega_desired # Desired angular momentum in world frame
 
-    return jnp.square(robust_norm(P_B - P_desired))/(mass**2) + jnp.square(robust_norm(L_B - L_desired))
+    return np.square(robust_norm(P_B - P_desired))/(mass**2) + np.square(robust_norm(L_B - L_desired))
 
 def smoothness_cost(phi, phi_dot, phi_dotdot, inertia):
     """
@@ -120,9 +120,9 @@ def smoothness_cost(phi, phi_dot, phi_dotdot, inertia):
     """
     R = euler_xyz_to_matrix(phi)
     omega_b, alpha_b = euler_xyz_rates_to_body_omega_alpha(phi, phi_dot, phi_dotdot)
-    hdot_b = inertia @ alpha_b + jnp.cross(omega_b, inertia @ omega_b)
+    hdot_b = inertia @ alpha_b + np.cross(omega_b, inertia @ omega_b)
     Ldot_w = R @ hdot_b
-    return jnp.square(robust_norm(Ldot_w))
+    return np.square(robust_norm(Ldot_w))
 
 def slack_variables_cost(eps):
     """
@@ -131,7 +131,7 @@ def slack_variables_cost(eps):
 
         return: slack variable cost (sum of squares)
     """
-    return jnp.sum(jnp.square(eps))
+    return np.sum(np.square(eps))
 
 
 

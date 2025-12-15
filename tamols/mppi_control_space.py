@@ -13,7 +13,6 @@ Uses PyTorch for GPU acceleration.
 import torch
 import numpy as np
 from typing import Tuple, Callable, Optional
-import jax.numpy as jnp
 
 
 class ControlSpaceMPPI:
@@ -308,8 +307,8 @@ class QuadrupedControlSpaceMPPI:
         self.grid_cell_length = float(terrain.grid_cell_length)
     
     def state_to_torch(self, state) -> torch.Tensor:
-        """Convert JAX/numpy state to PyTorch tensor."""
-        if isinstance(state, (jnp.ndarray, np.ndarray)):
+        """Convert numpy state to PyTorch tensor."""
+        if isinstance(state, np.ndarray):
             return torch.tensor(np.asarray(state), device=self.device, dtype=torch.float32)
         return state
     

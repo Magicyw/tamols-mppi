@@ -10,7 +10,7 @@ This script shows how to use the control-space MPPI approach where:
 This is the theoretically correct MPPI formulation for control problems.
 """
 
-import jax.numpy as jnp
+import numpy as np
 import numpy as np
 from tamols.tamols_dataclasses import Gait, Terrain, Robot
 from tamols import TAMOLS, plot_all_iterations, get_trajectory_function, plot_base
@@ -33,37 +33,37 @@ def run_control_space_mppi_example():
         n_steps=3,
         n_phases=2,
         spline_order=5,
-        tau_k=jnp.array([1.0, 1.0]),
+        tau_k=np.array([1.0, 1.0]),
         h_des=0.445,
         eps_min=0.1,
-        weights=jnp.array([10.0e4, 0.001, 7.0, 100.0, 3.0, 0.01, 2.0, 0.001]),
-        desired_base_velocity=jnp.array([0.3, 0.0, 0.0]),
-        desired_base_angular_velocity=jnp.array([0.0, 0.0, 0.0]),
+        weights=np.array([10.0e4, 0.001, 7.0, 100.0, 3.0, 0.01, 2.0, 0.001]),
+        desired_base_velocity=np.array([0.3, 0.0, 0.0]),
+        desired_base_angular_velocity=np.array([0.0, 0.0, 0.0]),
         apex_height=0.1,
-        contact_schedule=jnp.array([
+        contact_schedule=np.array([
             [0, 1, 1, 0],
             [1, 0, 0, 1],
         ]),
-        at_des_position=jnp.array([
+        at_des_position=np.array([
             [1, 0, 0, 1],
             [1, 1, 1, 1],
         ])
     )
     
     # Define terrain (flat for simplicity in this demo)
-    h = jnp.array(get_flat_heightmap(a=150, b=150, height=0.0))
+    h = np.array(get_flat_heightmap(a=150, b=150, height=0.0))
     
     terrain = Terrain(
         heightmap=h,
         grid_cell_length=0.04,
         mu=0.6,
-        gravity=jnp.array([0.0, 0.0, -9.81]),
+        gravity=np.array([0.0, 0.0, -9.81]),
     )
     
     # Define robot parameters
-    I_A = jnp.diag(jnp.array([0.107027, 0.0980771, 0.0244531]))
-    r = jnp.array([0.021112, 0, -0.005366])
-    q = jnp.array([-0.000543471, 0.713435, -0.00173769, 0.700719])
+    I_A = np.diag(np.array([0.107027, 0.0980771, 0.0244531]))
+    r = np.array([0.021112, 0, -0.005366])
+    q = np.array([-0.000543471, 0.713435, -0.00173769, 0.700719])
     mass = 6.921
     
     robot = Robot(
@@ -71,16 +71,16 @@ def run_control_space_mppi_example():
         inertia=transform_inertia(I_A, mass, r, q),
         l_min=0.1,
         l_max=0.5,
-        r_1=jnp.array([0.1934, 0.0465+0.0955, 0.0]),
-        r_2=jnp.array([0.1934, -0.0465-0.0955, 0.0]),
-        r_3=jnp.array([-0.1934, 0.0465+0.0955, 0.0]),
-        r_4=jnp.array([-0.1934, -0.0465-0.0955, 0.0]),
-        p_1_start=jnp.array([0.1934, 0.0465+0.0955, 0.0]),
-        p_2_start=jnp.array([0.1934, -0.0465-0.0955, 0.0]),
-        p_3_start=jnp.array([-0.1934, 0.0465+0.0955, 0.0]),
-        p_4_start=jnp.array([-0.1934, -0.0465-0.0955, 0.0]),
-        initial_base_pose=jnp.array([0.0, 0.0, 0.445, 0.0, 0.0, 0.0]),
-        initial_base_velocity=jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        r_1=np.array([0.1934, 0.0465+0.0955, 0.0]),
+        r_2=np.array([0.1934, -0.0465-0.0955, 0.0]),
+        r_3=np.array([-0.1934, 0.0465+0.0955, 0.0]),
+        r_4=np.array([-0.1934, -0.0465-0.0955, 0.0]),
+        p_1_start=np.array([0.1934, 0.0465+0.0955, 0.0]),
+        p_2_start=np.array([0.1934, -0.0465-0.0955, 0.0]),
+        p_3_start=np.array([-0.1934, 0.0465+0.0955, 0.0]),
+        p_4_start=np.array([-0.1934, -0.0465-0.0955, 0.0]),
+        initial_base_pose=np.array([0.0, 0.0, 0.445, 0.0, 0.0, 0.0]),
+        initial_base_velocity=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
     )
     
     print("\n" + "=" * 60)

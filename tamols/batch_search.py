@@ -1,9 +1,8 @@
 import numpy as np
-import jax.numpy as jnp
+
 from tamols.tamols_dataclasses import Terrain, Gait, Robot
 from tamols.helpers import bilinear_interp, evaluate_spline_position, euler_xyz_to_matrix
 import math
-from jax.flatten_util import ravel_pytree
 
 def batch_search(
     terrain: Terrain,

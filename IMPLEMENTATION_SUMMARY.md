@@ -9,7 +9,7 @@ This document summarizes the implementation of control-space Model Predictive Pa
 The original TAMOLS implementation used a state-space MPPI approach that:
 1. Sampled spline coefficients and foot positions directly
 2. Enforced dynamics through soft constraint penalties
-3. Used JAX for computation
+3. Used NumPy for computation
 
 The problem statement requested:
 1. **Control-space rollouts**: Sample control inputs and propagate through dynamics
@@ -217,7 +217,7 @@ Comprehensive test suite validates:
 - Direct optimization of trajectory parameters
 - Fewer samples needed
 - Works well for smooth trajectories
-- Mature JAX implementation
+- Pure NumPy implementation
 
 **Considerations**:
 - Approximate MPPI formulation
@@ -281,11 +281,11 @@ tamols-mppi/
 - Excellent GPU support
 - Easy batched operations
 - Mature ecosystem
-- Compatible with JAX (different use cases)
+- Compatible with NumPy (different use cases)
 
-**Alternative considered**: Extend JAX implementation
+**Alternative considered**: Extend NumPy implementation
 - **Pros**: Single framework, existing code
-- **Cons**: Less clear separation, GPU support varies
+- **Cons**: Less clear separation, no GPU support
 
 ### 2. Kinematic Integration
 

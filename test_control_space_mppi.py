@@ -4,7 +4,7 @@ Simple test to verify control-space MPPI implementation works.
 
 import torch
 import numpy as np
-import jax.numpy as jnp
+import numpy as np
 from tamols.tamols_dataclasses import Gait, Terrain, Robot
 from tamols.mppi_control_space import ControlSpaceMPPI, QuadrupedControlSpaceMPPI
 from tamols.manual_heightmaps import get_flat_heightmap
@@ -69,43 +69,43 @@ def test_quadruped_control_space_mppi():
         n_steps=1,
         n_phases=1,
         spline_order=3,
-        tau_k=jnp.array([0.5]),
+        tau_k=np.array([0.5]),
         h_des=0.4,
         eps_min=0.1,
-        weights=jnp.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
-        desired_base_velocity=jnp.array([0.2, 0.0, 0.0]),
-        desired_base_angular_velocity=jnp.array([0.0, 0.0, 0.0]),
+        weights=np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+        desired_base_velocity=np.array([0.2, 0.0, 0.0]),
+        desired_base_angular_velocity=np.array([0.0, 0.0, 0.0]),
         apex_height=0.05,
-        contact_schedule=jnp.array([[1, 1, 1, 1]]),
-        at_des_position=jnp.array([[1, 1, 1, 1]])
+        contact_schedule=np.array([[1, 1, 1, 1]]),
+        at_des_position=np.array([[1, 1, 1, 1]])
     )
     
     # Flat terrain
-    h = jnp.array(get_flat_heightmap(a=50, b=50, height=0.0))
+    h = np.array(get_flat_heightmap(a=50, b=50, height=0.0))
     terrain = Terrain(
         heightmap=h,
         grid_cell_length=0.04,
         mu=0.6,
-        gravity=jnp.array([0.0, 0.0, -9.81]),
+        gravity=np.array([0.0, 0.0, -9.81]),
     )
     
     # Simple robot
-    I_A = jnp.diag(jnp.array([0.1, 0.1, 0.02]))
+    I_A = np.diag(np.array([0.1, 0.1, 0.02]))
     robot = Robot(
         mass=5.0,
         inertia=I_A,
         l_min=0.1,
         l_max=0.4,
-        r_1=jnp.array([0.2, 0.1, 0.0]),
-        r_2=jnp.array([0.2, -0.1, 0.0]),
-        r_3=jnp.array([-0.2, 0.1, 0.0]),
-        r_4=jnp.array([-0.2, -0.1, 0.0]),
-        p_1_start=jnp.array([0.2, 0.1, 0.0]),
-        p_2_start=jnp.array([0.2, -0.1, 0.0]),
-        p_3_start=jnp.array([-0.2, 0.1, 0.0]),
-        p_4_start=jnp.array([-0.2, -0.1, 0.0]),
-        initial_base_pose=jnp.array([0.0, 0.0, 0.4, 0.0, 0.0, 0.0]),
-        initial_base_velocity=jnp.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        r_1=np.array([0.2, 0.1, 0.0]),
+        r_2=np.array([0.2, -0.1, 0.0]),
+        r_3=np.array([-0.2, 0.1, 0.0]),
+        r_4=np.array([-0.2, -0.1, 0.0]),
+        p_1_start=np.array([0.2, 0.1, 0.0]),
+        p_2_start=np.array([0.2, -0.1, 0.0]),
+        p_3_start=np.array([-0.2, 0.1, 0.0]),
+        p_4_start=np.array([-0.2, -0.1, 0.0]),
+        initial_base_pose=np.array([0.0, 0.0, 0.4, 0.0, 0.0, 0.0]),
+        initial_base_velocity=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
     )
     
     # Create optimizer
@@ -161,30 +161,30 @@ def test_dynamics_function():
     
     # Minimal setup
     gait = Gait(
-        n_steps=1, n_phases=1, spline_order=3, tau_k=jnp.array([0.5]),
-        h_des=0.4, eps_min=0.1, weights=jnp.ones(8),
-        desired_base_velocity=jnp.array([0.2, 0.0, 0.0]),
-        desired_base_angular_velocity=jnp.zeros(3),
+        n_steps=1, n_phases=1, spline_order=3, tau_k=np.array([0.5]),
+        h_des=0.4, eps_min=0.1, weights=np.ones(8),
+        desired_base_velocity=np.array([0.2, 0.0, 0.0]),
+        desired_base_angular_velocity=np.zeros(3),
         apex_height=0.05,
-        contact_schedule=jnp.ones((1, 4)),
-        at_des_position=jnp.ones((1, 4))
+        contact_schedule=np.ones((1, 4)),
+        at_des_position=np.ones((1, 4))
     )
     
-    h = jnp.array(get_flat_heightmap(a=50, b=50, height=0.0))
+    h = np.array(get_flat_heightmap(a=50, b=50, height=0.0))
     terrain = Terrain(
         heightmap=h, grid_cell_length=0.04, mu=0.6,
-        gravity=jnp.array([0.0, 0.0, -9.81])
+        gravity=np.array([0.0, 0.0, -9.81])
     )
     
     robot = Robot(
-        mass=5.0, inertia=jnp.diag(jnp.array([0.1, 0.1, 0.02])),
+        mass=5.0, inertia=np.diag(np.array([0.1, 0.1, 0.02])),
         l_min=0.1, l_max=0.4,
-        r_1=jnp.array([0.2, 0.1, 0.0]), r_2=jnp.array([0.2, -0.1, 0.0]),
-        r_3=jnp.array([-0.2, 0.1, 0.0]), r_4=jnp.array([-0.2, -0.1, 0.0]),
-        p_1_start=jnp.array([0.2, 0.1, 0.0]), p_2_start=jnp.array([0.2, -0.1, 0.0]),
-        p_3_start=jnp.array([-0.2, 0.1, 0.0]), p_4_start=jnp.array([-0.2, -0.1, 0.0]),
-        initial_base_pose=jnp.array([0.0, 0.0, 0.4, 0.0, 0.0, 0.0]),
-        initial_base_velocity=jnp.zeros(6)
+        r_1=np.array([0.2, 0.1, 0.0]), r_2=np.array([0.2, -0.1, 0.0]),
+        r_3=np.array([-0.2, 0.1, 0.0]), r_4=np.array([-0.2, -0.1, 0.0]),
+        p_1_start=np.array([0.2, 0.1, 0.0]), p_2_start=np.array([0.2, -0.1, 0.0]),
+        p_3_start=np.array([-0.2, 0.1, 0.0]), p_4_start=np.array([-0.2, -0.1, 0.0]),
+        initial_base_pose=np.array([0.0, 0.0, 0.4, 0.0, 0.0, 0.0]),
+        initial_base_velocity=np.zeros(6)
     )
     
     mppi = QuadrupedControlSpaceMPPI(
@@ -216,30 +216,30 @@ def test_cost_function():
     print("\nTesting cost function...")
     
     gait = Gait(
-        n_steps=1, n_phases=1, spline_order=3, tau_k=jnp.array([0.5]),
-        h_des=0.4, eps_min=0.1, weights=jnp.ones(8),
-        desired_base_velocity=jnp.array([0.2, 0.0, 0.0]),
-        desired_base_angular_velocity=jnp.zeros(3),
+        n_steps=1, n_phases=1, spline_order=3, tau_k=np.array([0.5]),
+        h_des=0.4, eps_min=0.1, weights=np.ones(8),
+        desired_base_velocity=np.array([0.2, 0.0, 0.0]),
+        desired_base_angular_velocity=np.zeros(3),
         apex_height=0.05,
-        contact_schedule=jnp.ones((1, 4)),
-        at_des_position=jnp.ones((1, 4))
+        contact_schedule=np.ones((1, 4)),
+        at_des_position=np.ones((1, 4))
     )
     
-    h = jnp.array(get_flat_heightmap(a=50, b=50, height=0.0))
+    h = np.array(get_flat_heightmap(a=50, b=50, height=0.0))
     terrain = Terrain(
         heightmap=h, grid_cell_length=0.04, mu=0.6,
-        gravity=jnp.array([0.0, 0.0, -9.81])
+        gravity=np.array([0.0, 0.0, -9.81])
     )
     
     robot = Robot(
-        mass=5.0, inertia=jnp.diag(jnp.array([0.1, 0.1, 0.02])),
+        mass=5.0, inertia=np.diag(np.array([0.1, 0.1, 0.02])),
         l_min=0.1, l_max=0.4,
-        r_1=jnp.array([0.2, 0.1, 0.0]), r_2=jnp.array([0.2, -0.1, 0.0]),
-        r_3=jnp.array([-0.2, 0.1, 0.0]), r_4=jnp.array([-0.2, -0.1, 0.0]),
-        p_1_start=jnp.array([0.2, 0.1, 0.0]), p_2_start=jnp.array([0.2, -0.1, 0.0]),
-        p_3_start=jnp.array([-0.2, 0.1, 0.0]), p_4_start=jnp.array([-0.2, -0.1, 0.0]),
-        initial_base_pose=jnp.array([0.0, 0.0, 0.4, 0.0, 0.0, 0.0]),
-        initial_base_velocity=jnp.zeros(6)
+        r_1=np.array([0.2, 0.1, 0.0]), r_2=np.array([0.2, -0.1, 0.0]),
+        r_3=np.array([-0.2, 0.1, 0.0]), r_4=np.array([-0.2, -0.1, 0.0]),
+        p_1_start=np.array([0.2, 0.1, 0.0]), p_2_start=np.array([0.2, -0.1, 0.0]),
+        p_3_start=np.array([-0.2, 0.1, 0.0]), p_4_start=np.array([-0.2, -0.1, 0.0]),
+        initial_base_pose=np.array([0.0, 0.0, 0.4, 0.0, 0.0, 0.0]),
+        initial_base_velocity=np.zeros(6)
     )
     
     mppi = QuadrupedControlSpaceMPPI(

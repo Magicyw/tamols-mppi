@@ -14,7 +14,7 @@ The control-space MPPI implementation addresses the key limitation of the origin
 | **Dynamics** | Implicit (through constraints) | Explicit (forward integration) |
 | **Theory** | Approximate MPPI | Theoretically correct MPPI |
 | **Physics** | Must enforce via penalties | Naturally satisfied |
-| **Computation** | JAX (GPU-capable) | PyTorch (GPU-accelerated) |
+| **Computation** | NumPy (CPU-based) | PyTorch (GPU-accelerated) |
 
 ## Architecture
 
